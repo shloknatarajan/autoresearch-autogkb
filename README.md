@@ -41,13 +41,15 @@ and associations itself from the text — it is not handed any of them.
 | `annotations/` | 33 raw human-curated annotation JSONs (`PMC<id>.json`). Source material for the benchmark and useful as reference. |
 | `src/base/model.py` | The `Annotation` data model and the `AnnotationModel` interface every attempt inherits. |
 | `src/attempts/` | `AnnotationModel` implementations — one timestamped folder per attempt (see `src/attempts/README.md`). `20260601_204044_baseline/` is the starting point. |
+| `src/tools/` | Shared, cross-run tool library attempts import from and extend (see `src/tools/README.md`). Editable; persists across attempts/branches. |
 | `src/eval/annotation_bench.jsonl` | The benchmark: 32 papers, each with `pmcid`, `pmid`, `variants`, `annotations` (ground truth), and `markdown_content`. |
 | `src/eval/scoring.py` | Per-section LLM-as-judge scoring (judge-injected, so the aggregation is unit-tested). |
 | `src/eval/evaluate.py` | The evaluation harness + CLI. |
+| `src/autoresearch/loop.py` | Exit-criteria controller — enforces when the loop stops (max iterations / time budget / target score). |
 | `program.md` | The autonomous operating manual for the autoresearch agent (loop, constraints, exit criteria). |
-| `results.tsv` | Append-only ledger: one summary row (overall + per-section) per eval run. |
+| `results.tsv` | Append-only ledger: one summary row (overall + per-section) per eval run. Tracked, so run history is kept in git. |
 | `tests/` | Pytest suite for the interface, scoring, harness, and baseline. |
-| `logs/<attempt>/` | Full JSON run reports, one file per eval run, grouped by attempt. |
+| `logs/<attempt>/` | Full JSON run reports, one file per eval run, grouped by attempt. Tracked. |
 
 `src/eval/` also carries legacy sentence-level benchmark data
 (`sentence_bench*.jsonl`) the annotation benchmark was originally derived from; it is not
@@ -147,22 +149,40 @@ Useful flags: `--limit N` (only the first N papers — handy while iterating),
 
 ## AutoResearch loop
 
-This is the Karpathy-style part: a CLI agent iteratively improves the system against the
-benchmark. The full operating manual is in [`program.md`](program.md). In short:
+This is the Karpathy-style part: give an agent the task and let it experiment
+autonomously. **The loop is the agent itself** — there is no driver script. You launch it
+by pointing a coding agent at [`program.md`](program.md), which is its complete operating
+manual.
 
-1. Read the current best score from `results.tsv` and prior run reports in `logs/<attempt>/`.
-2. Form one hypothesis (prompt change, multi-pass extraction, per-table specialization, ...).
-3. Implement it as a **new timestamped attempt** under `src/attempts/` (see
-   `src/attempts/README.md`).
-4. Run the eval (`--limit` first to keep it cheap). Scores land in `logs/<attempt>/` and
-   `results.tsv`; record observations in the attempt's README.
-5. If the overall score improves, advance the branch; if equal or worse, revert. Repeat.
+### Launching autonomous research
 
-**Exit criteria (whichever triggers first stops the run):**
+Spin up your coding agent (Claude Code, Codex, etc.) in this repo, relax its permissions
+so it can run commands unattended, then prompt something like:
 
-- **Score threshold** — stop once the overall (or a target section) score reaches a goal.
-- **Max iterations** — stop after N improvement attempts.
-- **Time budget** — stop after a wall-clock budget ("let it cook" for X hours).
+> "Have a look at `program.md` and let's kick off a new experiment — do the setup first."
+
+The agent then loops on its own (because `program.md` tells it to, and not to pause for
+approval): read state → form one hypothesis → write a new attempt under `src/attempts/` →
+commit → run the eval → keep if the overall score improved, else `git reset`. Each run
+appends to `results.tsv` and writes `logs/<attempt>/<run>.json`.
+
+### Optional: enforce exit criteria
+
+`program.md` says to run until the human interrupts. To bound a run instead, gate it on
+the controller in `src/autoresearch/loop.py` (whichever triggers first stops it):
+
+- **Score threshold** — best overall score reaches a goal (`--target-score`).
+- **Max iterations** — N runs recorded in `results.tsv` (`--max-iterations`).
+- **Time budget** — a wall-clock budget (`--time-budget`, e.g. `2h`).
+
+```bash
+uv run python -m src.autoresearch.loop start --max-iterations 20 --time-budget 2h --target-score 0.8
+while uv run python -m src.autoresearch.loop check; do
+    # one iteration: agent creates a new attempt + runs the eval (appends to results.tsv)
+done
+```
+
+The controller tracks start time and reads `results.tsv`; it does **not** create attempts.
 
 ---
 
@@ -193,5 +213,5 @@ uv run python -m src.eval.evaluate \
 - [x] One-shot baseline attempt (`src/attempts/20260601_204044_baseline/`).
 - [x] Per-run logging (`logs/<attempt>/<run>.json`) + `results.tsv` ledger.
 - [x] Autoresearch operating manual (`program.md`).
-- [ ] An automated loop driver that enforces the exit criteria (currently agent-run).
+- [x] Exit-criteria loop controller (`src/autoresearch/loop.py`).
 - [ ] Stronger attempts (per-table extraction, multi-pass, validation against the schema).

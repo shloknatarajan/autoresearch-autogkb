@@ -41,6 +41,13 @@ uv run python -m src.eval.evaluate --model src.attempts.20260601_204044_baseline
 Each run writes a full JSON report to `logs/<attempt>/<run-timestamp>.json` and appends a
 one-line summary to the top-level `results.tsv` ledger.
 
+## Shared tools
+
+Attempts may import shared helpers from [`src/tools/`](../tools/) (a normal package, so
+`from src.tools.<module> import ...` works). When logic is reusable beyond a single
+attempt — variant normalization, table extraction, JSON repair — put it in `src/tools/`
+so future attempts can reuse it rather than re-deriving it.
+
 ## Attempts
 
 - [`20260601_204044_baseline`](20260601_204044_baseline/) — one-shot whole-paper →
